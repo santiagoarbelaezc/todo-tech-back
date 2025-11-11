@@ -7,9 +7,9 @@ on:
     branches: [development]
 
 env:
-  AWS_REGION: us-east-1
-  ELASTIC_BEANSTALK_APP_NAME: todo-tech-backend
-  ELASTIC_BEANSTALK_ENV_NAME: todo-tech-backend-dev
+  AWS_REGION: us-east-2  # ✅ Región correcta
+  ELASTIC_BEANSTALK_APP_NAME: todo-tech-shop  # ✅ Nombre correcto de la aplicación
+  ELASTIC_BEANSTALK_ENV_NAME: todo-tech-shop-back  # ✅ Nombre correcto del environment
 
 jobs:
   test:
@@ -146,3 +146,4 @@ jobs:
           echo "✅ Aplicación desplegada en AWS"
           echo "Application: ${{ env.ELASTIC_BEANSTALK_APP_NAME }}"
           echo "Environment: ${{ env.ELASTIC_BEANSTALK_ENV_NAME }}"
+          echo "URL: todotechback.us-east-2.elasticbeanstalk.com"
