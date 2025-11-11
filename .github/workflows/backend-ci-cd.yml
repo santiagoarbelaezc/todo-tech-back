@@ -1,0 +1,117 @@
+name: Backend CI/CD Pipeline
+
+on:
+  push:
+    branches: [development, main]
+  pull_request:
+    branches: [development]
+
+env:
+  AWS_REGION: us-east-1
+  ELASTIC_BEANSTALK_APP_NAME: todo-tech-backend
+  ELASTIC_BEANSTALK_ENV_NAME: todo-tech-backend-dev
+
+jobs:
+  test:
+    name: 1. Pruebas Unitarias Backend
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v4
+
+      - name: Configurar Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Configurar caché de Gradle
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+
+      - name: Dar permisos de ejecución a Gradle Wrapper
+        run: chmod +x ./gradlew
+
+      - name: Ejecutar pruebas unitarias
+        run: ./gradlew test
+
+      - name: Generar reporte de cobertura
+        run: ./gradlew jacocoTestReport
+
+      - name: Subir reporte de cobertura a Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./build/reports/jacoco/test/jacocoTestReport.xml
+
+  build:
+    name: 2. Construir y Testear
+    runs-on: ubuntu-latest
+    needs: test
+
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v4
+
+      - name: Configurar Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Construir aplicación con tests
+        run: ./gradlew build
+
+      - name: Listar archivos construidos
+        run: ls -la build/libs/
+
+      - name: Subir artefacto JAR
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-jar
+          path: build/libs/*.jar
+          retention-days: 7
+
+  deploy:
+    name: 3. Desplegar en AWS Elastic Beanstalk
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.ref == 'refs/heads/development' || github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v4
+
+      - name: Configurar Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Construir aplicación para producción
+        run: ./gradlew build -x test
+
+      - name: Configurar AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Desplegar en Elastic Beanstalk
+        uses: einaregilsson/beanstalk-deploy@v21
+        with:
+          aws_access_key: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws_secret_key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          application_name: ${{ env.ELASTIC_BEANSTALK_APP_NAME }}
+          environment_name: ${{ env.ELASTIC_BEANSTALK_ENV_NAME }}
+          version_label: ${{ github.sha }}-${{ github.run_id }}
+          region: ${{ env.AWS_REGION }}
+          deployment_package: build/libs/*.jar
+          wait_for_environment_recovery: 180
