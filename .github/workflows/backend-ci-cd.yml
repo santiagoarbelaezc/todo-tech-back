@@ -12,8 +12,8 @@ env:
   ELASTIC_BEANSTALK_ENV_NAME: todo-tech-backend-dev
 
 jobs:
-  build-and-deploy:
-    name: 1. Construir y Desplegar
+  test:
+    name: 1. Pruebas Unitarias (CI)
     runs-on: ubuntu-latest
 
     steps:
@@ -26,44 +26,53 @@ jobs:
           distribution: 'temurin'
           java-version: '21'
 
-      - name: Configurar caché de Gradle
-        uses: actions/cache@v3
-        with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper
-          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
-          restore-keys: |
-            ${{ runner.os }}-gradle-
-
       - name: Dar permisos de ejecución a Gradle Wrapper
         run: chmod +x ./gradlew
 
       - name: Compilar proyecto
         run: ./gradlew compileJava compileTestJava
 
-      - name: Ejecutar pruebas unitarias (OPCIONAL - solo para info)
+      - name: Ejecutar pruebas unitarias
         run: |
-          echo "=== EJECUTANDO TESTS SOLO PARA INFORMACIÓN ==="
-          # ✅ USAMOS true AL FINAL PARA IGNORAR CUALQUIER ERROR
-          ./gradlew test --no-daemon --continue || true
-          
-          echo "=== RESUMEN DE TESTS ==="
-          ./gradlew test --continue 2>&1 | grep -E "tests? (passed|failed)|FAILED" | head -10 || echo "No se pudo obtener resumen"
+          echo "=== EJECUTANDO PRUEBAS UNITARIAS ==="
+          ./gradlew test --no-daemon
 
-      - name: Construir aplicación SIN tests
+      - name: Generar reporte de cobertura
+        run: ./gradlew jacocoTestReport
+
+      - name: Subir reporte de cobertura a Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./build/reports/jacoco/test/jacocoTestReport.xml
+
+  build:
+    name: 2. Construir Artefacto
+    runs-on: ubuntu-latest
+    needs: test  # ✅ DEPENDE DE QUE LAS PRUEBAS PASEN
+
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v4
+
+      - name: Configurar Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Construir aplicación
         run: |
-          echo "=== CONSTRUYENDO APLICACIÓN (SIN TESTS) ==="
-          # ✅ CLAVE: -x test EXCLUYE la ejecución de tests
+          echo "=== CONSTRUYENDO ARTEFACTO ==="
           ./gradlew build -x test --no-daemon
 
-      - name: Verificar artefacto construido
+      - name: Verificar y listar artefacto JAR
         run: |
-          echo "=== ARTEFACTO GENERADO ==="
+          echo "=== VERIFICANDO ARTEFACTO JAR ==="
           ls -la build/libs/
-          echo "=== INFORMACIÓN DEL JAR ==="
-          file build/libs/*.jar
-          echo "Tamaño: $(du -h build/libs/*.jar | cut -f1)"
+          echo "=== NOMBRE EXACTO DEL JAR ==="
+          JAR_FILE=$(ls build/libs/*.jar)
+          echo "JAR encontrado: $JAR_FILE"
+          echo "JAR_FILENAME=$JAR_FILE" >> $GITHUB_ENV
 
       - name: Subir artefacto JAR
         uses: actions/upload-artifact@v4
@@ -71,6 +80,28 @@ jobs:
           name: backend-jar
           path: build/libs/*.jar
           retention-days: 7
+
+  deploy:
+    name: 3. Desplegar en AWS (CD)
+    runs-on: ubuntu-latest
+    needs: build  # ✅ DEPENDE DE QUE EL BUILD SEA EXITOSO
+    if: github.ref == 'refs/heads/development' || github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Descargar artefacto JAR
+        uses: actions/download-artifact@v4
+        with:
+          name: backend-jar
+          path: build/libs/
+
+      - name: Verificar artefacto descargado
+        run: |
+          echo "=== VERIFICANDO ARTEFACTO DESCARGADO ==="
+          ls -la build/libs/
+          echo "=== NOMBRE EXACTO DEL JAR PARA DEPLOY ==="
+          JAR_FILE=$(ls build/libs/*.jar)
+          echo "JAR para deploy: $JAR_FILE"
+          echo "DEPLOY_JAR=$JAR_FILE" >> $GITHUB_ENV
 
       - name: Configurar AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -88,14 +119,14 @@ jobs:
           environment_name: ${{ env.ELASTIC_BEANSTALK_ENV_NAME }}
           version_label: ${{ github.sha }}-${{ github.run_id }}
           region: ${{ env.AWS_REGION }}
-          deployment_package: build/libs/*.jar
+          deployment_package: build/libs/$(ls build/libs/ | grep .jar)  # ✅ CORREGIDO
           wait_for_environment_recovery: 180
 
       - name: Verificar despliegue exitoso
         run: |
-          echo "🎉 ¡Pipeline completado exitosamente!"
-          echo "✅ Aplicación construida"
-          echo "✅ Artefacto generado" 
-          echo "✅ Desplegado en AWS Elastic Beanstalk"
+          echo "🎉 ¡DevOps completado exitosamente!"
+          echo "✅ Pruebas unitarias pasadas"
+          echo "✅ Artefacto construido"
+          echo "✅ Aplicación desplegada en AWS"
           echo "Application: ${{ env.ELASTIC_BEANSTALK_APP_NAME }}"
           echo "Environment: ${{ env.ELASTIC_BEANSTALK_ENV_NAME }}"
