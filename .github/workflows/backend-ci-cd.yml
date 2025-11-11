@@ -77,7 +77,7 @@ jobs:
           echo "=== VERIFICANDO ARTEFACTO JAR ==="
           ls -la build/libs/
           echo "=== NOMBRE EXACTO DEL JAR ==="
-          JAR_FILE=$(ls build/libs/*.jar)
+          JAR_FILE=$(ls build/libs/*.jar | grep -v plain | head -n 1)
           echo "JAR encontrado: $JAR_FILE"
           echo "JAR_FILENAME=$JAR_FILE" >> $GITHUB_ENV
 
