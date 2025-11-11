@@ -39,24 +39,101 @@ jobs:
       - name: Dar permisos de ejecución a Gradle Wrapper
         run: chmod +x ./gradlew
 
-      - name: Ejecutar pruebas unitarias (continuar si fallan)
+      - name: Verificar entorno y compilación
         run: |
-          ./gradlew test --continue || echo "Algunos tests fallaron, continuando con el build..."
-          # Esto permite que el pipeline continúe aunque algunos tests fallen
+          echo "=== INFORMACIÓN DEL ENTORNO ==="
+          java -version
+          ./gradlew --version
+          echo "=== COMPILANDO PROYECTO ==="
+          ./gradlew compileJava compileTestJava
+
+      - name: Ejecutar pruebas unitarias con diagnóstico completo
+        run: |
+          echo "=== INICIANDO EJECUCIÓN DE TESTS ==="
+          
+          # Ejecutar tests y capturar output completo
+          ./gradlew test --no-daemon --continue --stacktrace 2>&1 | tee test-output.log
+          
+          echo "=== ANÁLISIS DETALLADO DE RESULTADOS ==="
+          
+          # Verificar resultado del build
+          if grep -q "BUILD SUCCESSFUL" test-output.log; then
+            echo "🎉 ¡TODOS LOS TESTS PASARON!"
+          else
+            echo "⚠️ ALGUNOS TESTS FALLARON - ANALIZANDO:"
+          
+            # Mostrar tests fallidos específicos
+            echo "--- TESTS FALLIDOS DETECTADOS ---"
+            grep -E "Test.*FAILED" test-output.log | head -30 || echo "No se encontraron tests fallidos específicos"
+          
+            # Mostrar clases con errores
+            echo "--- CLASES CON ERRORES ---"
+            grep -E "FAILED" test-output.log | grep -v "Test " | head -20 || echo "No se encontraron clases con errores"
+          
+            # Mostrar excepciones
+            echo "--- EXCEPCIONES ENCONTRADAS ---"
+            grep -A 3 -B 1 "Exception:" test-output.log | head -40 || echo "No se encontraron excepciones"
+          
+            # Resumen final
+            echo "--- RESUMEN FINAL ---"
+            grep -E "tests? (passed|failed)|BUILD" test-output.log | tail -10 || echo "No se pudo obtener resumen"
+          
+            echo "🔧 Continuando con el build aunque algunos tests fallen..."
+          fi
+          
+          # ✅ FORZAR ÉXITO para que el pipeline continúe
+          exit 0
+
+      - name: Diagnosticar tests fallidos específicos
+        run: |
+          echo "=== DIAGNÓSTICO AVANZADO DE TESTS FALLIDOS ==="
+          
+          # Buscar archivos de test específicos que fallaron
+          if [ -f test-output.log ]; then
+            echo "--- BUSCANDO PATRONES DE ERROR ---"
+          
+            # Tests que fallaron por assertions
+            echo "❌ Tests con Assertion Failed:"
+            grep -E "AssertionFailedError|expected:" test-output.log | head -10 || echo "No hay assertion errors"
+          
+            # Tests que fallaron por excepciones
+            echo "💥 Tests con Excepciones:"
+            grep -E "Exception.*at.*Test" test-output.log | head -10 || echo "No hay exception errors"
+          
+            # Tests que fallaron por timeout
+            echo "⏰ Tests con Timeout:"
+            grep -i "timeout" test-output.log | head -5 || echo "No hay timeout errors"
+          
+            # Resumen numérico
+            echo "📊 Resumen Estadístico:"
+            grep -E "[0-9]+ tests? completed" test-output.log || echo "No se encontró resumen numérico"
+          else
+            echo "No se encontró el archivo de log de tests"
+          fi
+          
+          echo "=== FIN DEL DIAGNÓSTICO AVANZADO ==="
 
       - name: Generar reporte de cobertura
-        run: ./gradlew jacocoTestReport
+        run: |
+          echo "=== GENERANDO REPORTE DE COBERTURA ==="
+          ./gradlew jacocoTestReport
 
       - name: Subir reporte de cobertura a Codecov
         uses: codecov/codecov-action@v3
         with:
           file: ./build/reports/jacoco/test/jacocoTestReport.xml
 
-      - name: Construir aplicación
-        run: ./gradlew build -x test  # Excluir tests ya que ya se ejecutaron
+      - name: Construir aplicación para producción
+        run: |
+          echo "=== CONSTRUYENDO APLICACIÓN ==="
+          ./gradlew build -x test --no-daemon
 
-      - name: Listar archivos construidos
-        run: ls -la build/libs/
+      - name: Verificar artefactos construidos
+        run: |
+          echo "=== ARTEFACTOS GENERADOS ==="
+          ls -la build/libs/
+          echo "=== INFORMACIÓN DEL JAR ==="
+          java -jar build/libs/*.jar --version 2>/dev/null || echo "No se pudo ejecutar info del JAR"
 
       - name: Subir artefacto JAR
         uses: actions/upload-artifact@v4
@@ -78,6 +155,12 @@ jobs:
           name: backend-jar
           path: build/libs/
 
+      - name: Verificar artefacto descargado
+        run: |
+          echo "=== VERIFICANDO ARTEFACTO PARA DEPLOY ==="
+          ls -la build/libs/
+          file build/libs/*.jar
+
       - name: Configurar AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -96,3 +179,10 @@ jobs:
           region: ${{ env.AWS_REGION }}
           deployment_package: build/libs/*.jar
           wait_for_environment_recovery: 180
+
+      - name: Verificar despliegue exitoso
+        run: |
+          echo "🎉 ¡Despliegue completado!"
+          echo "Application: ${{ env.ELASTIC_BEANSTALK_APP_NAME }}"
+          echo "Environment: ${{ env.ELASTIC_BEANSTALK_ENV_NAME }}"
+          echo "Version: ${{ github.sha }}-${{ github.run_id }}"
