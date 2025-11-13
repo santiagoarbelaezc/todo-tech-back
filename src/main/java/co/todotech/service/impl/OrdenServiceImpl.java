@@ -25,9 +25,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.UUID;
+import java.util.*;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -289,11 +287,7 @@ public class OrdenServiceImpl implements OrdenService {
                 .collect(Collectors.toList());
     }
 
-    @Override
-    @Transactional
-    public OrdenDto marcarComoPagada(Long id) {
-        return actualizarEstadoOrden(id, EstadoOrden.PAGADA);
-    }
+
 
     @Override
     @Transactional
@@ -444,6 +438,137 @@ public class OrdenServiceImpl implements OrdenService {
         return ordenRepository.findByEstado(EstadoOrden.DISPONIBLEPARAPAGO)
                 .stream()
                 .map(ordenMapper::toDto)
+                .collect(Collectors.toList());
+    }
+
+
+    @Transactional(readOnly = true)
+    public Map<String, Object> getOrdenStatusForMonitoring(Long ordenId) {
+        log.info("MONITORING_ORDER_STATUS - action: QUERY, orderId: {}", ordenId);
+
+        try {
+            Orden orden = ordenRepository.findByIdWithDetalles(ordenId)
+                    .orElseThrow(() -> new RuntimeException("Orden no encontrada"));
+
+            Map<String, Object> status = new HashMap<>();
+            status.put("orderId", orden.getId());
+            status.put("numeroOrden", orden.getNumeroOrden());
+            status.put("estado", orden.getEstado().toString());
+            status.put("pagada", orden.getEstado().equals(EstadoOrden.PAGADA));
+            status.put("total", orden.getTotal());
+            status.put("fecha", orden.getFecha().toString());
+            status.put("cliente", orden.getCliente().getNombre());
+            status.put("vendedor", orden.getVendedor().getNombre());
+            status.put("productosCount", orden.getProductos().size());
+            status.put("subtotal", orden.getSubtotal());
+            status.put("descuento", orden.getDescuento());
+            status.put("impuestos", orden.getImpuestos());
+
+            // ✅ LOG ESTRUCTURADO PARA CLOUDWATCH
+            log.info("MONITORING_ORDER_STATUS - orderId: {}, numeroOrden: {}, estado: {}, pagada: {}, total: {}, productos: {}",
+                    ordenId, orden.getNumeroOrden(), orden.getEstado(),
+                    orden.getEstado().equals(EstadoOrden.PAGADA), orden.getTotal(),
+                    orden.getProductos().size());
+
+            return status;
+
+        } catch (Exception e) {
+            log.error("MONITORING_ORDER_STATUS_ERROR - orderId: {}, error: {}", ordenId, e.getMessage());
+            return Map.of("error", "Orden no encontrada", "orderId", ordenId);
+        }
+    }
+
+    /**
+     * ✅ MÉTODO PARA MONITOREO: Resumen general de órdenes
+     */
+    @Transactional(readOnly = true)
+    public Map<String, Object> getOrdenesSummaryForMonitoring() {
+        log.info("MONITORING_ORDERS_SUMMARY - action: GENERATE_REPORT");
+
+        List<Orden> ordenes = ordenRepository.findAll();
+
+        Map<EstadoOrden, Long> conteoPorEstado = ordenes.stream()
+                .collect(Collectors.groupingBy(Orden::getEstado, Collectors.counting()));
+
+        long totalPagadas = ordenes.stream()
+                .filter(orden -> orden.getEstado().equals(EstadoOrden.PAGADA))
+                .count();
+
+        double totalVentas = ordenes.stream()
+                .filter(orden -> orden.getEstado().equals(EstadoOrden.PAGADA))
+                .mapToDouble(Orden::getTotal)
+                .sum();
+
+        Map<String, Object> summary = new HashMap<>();
+        summary.put("totalOrdenes", ordenes.size());
+        summary.put("totalPagadas", totalPagadas);
+        summary.put("totalVentas", totalVentas);
+        summary.put("conteoPorEstado", conteoPorEstado);
+        summary.put("timestamp", LocalDateTime.now().toString());
+
+        // ✅ LOG ESTRUCTURADO PARA DASHBOARD
+        log.info("MONITORING_ORDERS_SUMMARY - totalOrdenes: {}, totalPagadas: {}, totalVentas: {}, estados: {}",
+                ordenes.size(), totalPagadas, totalVentas, conteoPorEstado);
+
+        return summary;
+    }
+
+    /**
+     * ✅ MÉTODO MEJORADO: Marcar como pagada con monitoreo
+     */
+    @Override
+    @Transactional
+    public OrdenDto marcarComoPagada(Long id) {
+        log.info("MONITORING_PAYMENT_EVENT - action: PAYMENT_PROCESSING_START, orderId: {}", id);
+
+        try {
+            Orden orden = ordenRepository.findByIdWithDetalles(id)
+                    .orElseThrow(() -> new RuntimeException("Orden no encontrada"));
+
+            // Validar que puede ser pagada
+            if (!orden.getEstado().equals(EstadoOrden.DISPONIBLEPARAPAGO)) {
+                log.warn("MONITORING_PAYMENT_EVENT - action: PAYMENT_REJECTED, orderId: {}, reason: INVALID_STATUS, currentStatus: {}",
+                        id, orden.getEstado());
+                throw new RuntimeException("La orden no está disponible para pago. Estado actual: " + orden.getEstado());
+            }
+
+            // Cambiar estado
+            orden.setEstado(EstadoOrden.PAGADA);
+            Orden ordenActualizada = ordenRepository.save(orden);
+
+            // ✅ LOG ESTRUCTURADO PARA MONITOREO
+            log.info("MONITORING_PAYMENT_EVENT - action: PAYMENT_SUCCESS, orderId: {}, numeroOrden: {}, amount: {}, customer: {}, vendedor: {}",
+                    id, orden.getNumeroOrden(), orden.getTotal(),
+                    orden.getCliente().getNombre(), orden.getVendedor().getNombre());
+
+            return ordenMapper.toDto(ordenActualizada);
+
+        } catch (Exception e) {
+            log.error("MONITORING_PAYMENT_EVENT - action: PAYMENT_ERROR, orderId: {}, error: {}", id, e.getMessage());
+            throw e;
+        }
+    }
+
+    /**
+     * ✅ MÉTODO PARA MONITOREO: Órdenes por estado específico
+     */
+    @Transactional(readOnly = true)
+    public List<Map<String, Object>> getOrdenesPorEstadoForMonitoring(EstadoOrden estado) {
+        log.info("MONITORING_ORDERS_BY_STATUS - action: QUERY, status: {}", estado);
+
+        return ordenRepository.findByEstado(estado)
+                .stream()
+                .map(orden -> {
+                    Map<String, Object> orderInfo = new HashMap<>();
+                    orderInfo.put("orderId", orden.getId());
+                    orderInfo.put("numeroOrden", orden.getNumeroOrden());
+                    orderInfo.put("estado", orden.getEstado().toString());
+                    orderInfo.put("total", orden.getTotal());
+                    orderInfo.put("fecha", orden.getFecha().toString());
+                    orderInfo.put("cliente", orden.getCliente().getNombre());
+                    orderInfo.put("productosCount", orden.getProductos().size());
+                    return orderInfo;
+                })
                 .collect(Collectors.toList());
     }
 }
