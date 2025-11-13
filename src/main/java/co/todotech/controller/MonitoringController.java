@@ -187,44 +187,49 @@ public class MonitoringController {
      * ✅ ENDPOINT PARA VERIFICAR SALUD DEL MONITOREO
      * URL: GET /api/monitoring/health
      */
-    @GetMapping("/health")
-// @PreAuthorize("isAuthenticated()")  // ❌ REMOVER temporalmente
-    public ResponseEntity<MensajeDto<Map<String, Object>>> getHealthCheck() {
+
+    @GetMapping("/monitoring/health")
+    public ResponseEntity<MensajeDto<Map<String, Object>>> monitoringHealth() {
         try {
-            log.info("MONITORING_API - Verificando salud del sistema de monitoreo");
+            log.info("🔴 MONITORING_HEALTH - Health check solicitado");
 
             Map<String, Object> health = Map.of(
                     "status", "healthy",
                     "service", "monitoring",
-                    "timestamp", java.time.LocalDateTime.now().toString(),
-                    "endpointsAvailable", List.of(
-                            "/api/monitoring/ordenes/{id}/estado",
-                            "/api/monitoring/ordenes/summary",
-                            "/api/monitoring/ordenes/pagadas",
-                            "/api/monitoring/estadisticas"
-                    )
+                    "timestamp", java.time.LocalDateTime.now().toString()
             );
 
-            return ResponseEntity.ok()
-                    .body(new MensajeDto<>(false, "Sistema de monitoreo funcionando correctamente", health));
+            return ResponseEntity.ok(new MensajeDto<>(false, "Sistema funcionando", health));
 
         } catch (Exception e) {
-            log.error("MONITORING_API_ERROR - Error en health check: {}", e.getMessage());
+            log.error("MONITORING_HEALTH_ERROR - Error: {}", e.getMessage());
             return ResponseEntity.internalServerError()
-                    .body(new MensajeDto<>(true, "Error en sistema de monitoreo: " + e.getMessage(), null));
+                    .body(new MensajeDto<>(true, "Error en health check", null));
         }
     }
 
-    @GetMapping("/test")
-    public ResponseEntity<Map<String, String>> testEndpoint() {
-        log.info("🔴 TEST_LOG - Este es un mensaje de prueba para CloudWatch");
-        log.info("🟢 MONITORING_TEST - orderId: 999, status: TEST, paid: true, amount: 100.50");
-        log.info("🟡 MONITORING_API - Test endpoint ejecutado correctamente");
+    @GetMapping("/monitoring/ordenes/{id}/estado")
+    @PreAuthorize("hasRole('ADMIN') or hasRole('VENDEDOR') or hasRole('CAJERO')")
+    public ResponseEntity<MensajeDto<Map<String, Object>>> getOrdenStatusMonitoring(@PathVariable("id") Long id) {
+        try {
+            log.info("MONITORING_ORDER_STATUS - Consultando orden: {}", id);
 
-        return ResponseEntity.ok(Map.of(
-                "status", "success",
-                "message", "Logs de prueba generados para CloudWatch",
-                "timestamp", java.time.LocalDateTime.now().toString()
-        ));
+            // Usa el servicio existente
+            Map<String, Object> status = ordenService.getOrdenStatusForMonitoring(id);
+
+            if (status.containsKey("error")) {
+                return ResponseEntity.status(404)
+                        .body(new MensajeDto<>(true, "Orden no encontrada", status));
+            }
+
+            return ResponseEntity.ok()
+                    .body(new MensajeDto<>(false, "Estado obtenido exitosamente", status));
+
+        } catch (Exception e) {
+            log.error("MONITORING_ORDER_STATUS_ERROR - Error: {}", e.getMessage());
+            return ResponseEntity.badRequest()
+                    .body(new MensajeDto<>(true, "Error consultando orden", null));
+        }
+
     }
 }
