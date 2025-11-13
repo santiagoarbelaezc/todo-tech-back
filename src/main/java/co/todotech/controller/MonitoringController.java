@@ -21,6 +21,58 @@ public class MonitoringController {
     private final OrdenServiceImpl ordenService;
 
     /**
+     * ✅ ENDPOINT PÚBLICO PARA HEALTH CHECK
+     * URL: GET /api/monitoring/health
+     */
+    @GetMapping("/health")
+    public ResponseEntity<MensajeDto<Map<String, Object>>> monitoringHealth() {
+        try {
+            log.info("🔴 MONITORING_HEALTH - Health check solicitado desde Postman");
+            log.info("🟢 MONITORING_SYSTEM - Sistema de monitoreo activo - CloudFront: https://d2jctboz5xbevf.cloudfront.net");
+
+            Map<String, Object> health = Map.of(
+                    "status", "healthy",
+                    "service", "todo-tech-monitoring",
+                    "cloudfront", "https://d2jctboz5xbevf.cloudfront.net",
+                    "timestamp", java.time.LocalDateTime.now().toString(),
+                    "endpoints", List.of(
+                            "/api/monitoring/health",
+                            "/api/monitoring/ordenes/{id}/estado",
+                            "/api/monitoring/ordenes/summary",
+                            "/api/monitoring/test"
+                    )
+            );
+
+            return ResponseEntity.ok(new MensajeDto<>(false, "✅ Sistema de monitoreo funcionando correctamente", health));
+
+        } catch (Exception e) {
+            log.error("❌ MONITORING_HEALTH_ERROR - Error en health check: {}", e.getMessage());
+            return ResponseEntity.internalServerError()
+                    .body(new MensajeDto<>(true, "Error en sistema de monitoreo", null));
+        }
+    }
+
+    /**
+     * ✅ ENDPOINT PÚBLICO DE PRUEBA
+     * URL: GET /api/monitoring/test
+     */
+    @GetMapping("/test")
+    public ResponseEntity<MensajeDto<Map<String, String>>> monitoringTest() {
+        log.info("🧪 MONITORING_TEST_INICIO - Endpoint de prueba ejecutado desde Postman");
+        log.info("📝 MONITORING_TEST_DETALLE - orderId: 999, status: TEST, paid: true, amount: 150.75");
+        log.info("✅ MONITORING_TEST_FIN - Prueba completada exitosamente");
+
+        Map<String, String> response = Map.of(
+                "status", "success",
+                "message", "✅ Prueba de monitoreo exitosa - Los logs están funcionando",
+                "cloudfront", "https://d2jctboz5xbevf.cloudfront.net",
+                "timestamp", java.time.LocalDateTime.now().toString()
+        );
+
+        return ResponseEntity.ok(new MensajeDto<>(false, "Prueba de monitoreo exitosa", response));
+    }
+
+    /**
      * ✅ ENDPOINT PARA VER ESTADO DE UNA ORDEN ESPECÍFICA
      * URL: GET /api/monitoring/ordenes/{id}/estado
      */
@@ -28,20 +80,24 @@ public class MonitoringController {
     @PreAuthorize("hasRole('ADMIN') or hasRole('VENDEDOR') or hasRole('CAJERO')")
     public ResponseEntity<MensajeDto<Map<String, Object>>> getEstadoOrden(@PathVariable("id") Long id) {
         try {
-            log.info("MONITORING_API - Consultando estado de orden: {}", id);
+            log.info("📊 MONITORING_ORDER_STATUS - Consultando estado de orden: {}", id);
 
             Map<String, Object> status = ordenService.getOrdenStatusForMonitoring(id);
 
             if (status.containsKey("error")) {
+                log.warn("⚠️ MONITORING_ORDER_NOT_FOUND - Orden no encontrada: {}", id);
                 return ResponseEntity.status(404)
                         .body(new MensajeDto<>(true, "Orden no encontrada", status));
             }
+
+            log.info("✅ MONITORING_ORDER_SUCCESS - Orden: {}, Estado: {}, Pagada: {}, Total: {}",
+                    id, status.get("estado"), status.get("pagada"), status.get("total"));
 
             return ResponseEntity.ok()
                     .body(new MensajeDto<>(false, "Estado de orden obtenido exitosamente", status));
 
         } catch (Exception e) {
-            log.error("MONITORING_API_ERROR - Error consultando orden {}: {}", id, e.getMessage());
+            log.error("❌ MONITORING_API_ERROR - Error consultando orden {}: {}", id, e.getMessage());
             return ResponseEntity.badRequest()
                     .body(new MensajeDto<>(true, "Error al consultar orden: " + e.getMessage(), null));
         }
@@ -55,15 +111,18 @@ public class MonitoringController {
     @PreAuthorize("hasRole('ADMIN') or hasRole('VENDEDOR')")
     public ResponseEntity<MensajeDto<Map<String, Object>>> getOrdenesSummary() {
         try {
-            log.info("MONITORING_API - Generando resumen de órdenes");
+            log.info("📈 MONITORING_SUMMARY - Generando resumen de órdenes");
 
             Map<String, Object> summary = ordenService.getOrdenesSummaryForMonitoring();
+
+            log.info("✅ MONITORING_SUMMARY_SUCCESS - Total órdenes: {}, Pagadas: {}, Ventas: {}",
+                    summary.get("totalOrdenes"), summary.get("totalPagadas"), summary.get("totalVentas"));
 
             return ResponseEntity.ok()
                     .body(new MensajeDto<>(false, "Resumen de órdenes generado exitosamente", summary));
 
         } catch (Exception e) {
-            log.error("MONITORING_API_ERROR - Error generando resumen: {}", e.getMessage());
+            log.error("❌ MONITORING_API_ERROR - Error generando resumen: {}", e.getMessage());
             return ResponseEntity.badRequest()
                     .body(new MensajeDto<>(true, "Error al generar resumen: " + e.getMessage(), null));
         }
@@ -78,22 +137,22 @@ public class MonitoringController {
     public ResponseEntity<MensajeDto<List<Map<String, Object>>>> getOrdenesPorEstado(
             @PathVariable("estado") String estado) {
         try {
-            log.info("MONITORING_API - Consultando órdenes por estado: {}", estado);
+            log.info("🔍 MONITORING_ORDERS_BY_STATUS - Consultando órdenes por estado: {}", estado);
 
             EstadoOrden estadoEnum = EstadoOrden.valueOf(estado.toUpperCase());
             List<Map<String, Object>> ordenes = ordenService.getOrdenesPorEstadoForMonitoring(estadoEnum);
 
+            log.info("✅ MONITORING_ORDERS_BY_STATUS_SUCCESS - Estado: {}, Cantidad: {}", estado, ordenes.size());
+
             return ResponseEntity.ok()
-                    .body(new MensajeDto<>(false,
-                            "Órdenes por estado obtenidas exitosamente",
-                            ordenes));
+                    .body(new MensajeDto<>(false, "Órdenes por estado obtenidas exitosamente", ordenes));
 
         } catch (IllegalArgumentException e) {
-            log.warn("MONITORING_API_WARN - Estado inválido: {}", estado);
+            log.warn("⚠️ MONITORING_API_WARN - Estado inválido: {}", estado);
             return ResponseEntity.badRequest()
                     .body(new MensajeDto<>(true, "Estado inválido: " + estado, null));
         } catch (Exception e) {
-            log.error("MONITORING_API_ERROR - Error consultando órdenes por estado: {}", e.getMessage());
+            log.error("❌ MONITORING_API_ERROR - Error consultando órdenes por estado: {}", e.getMessage());
             return ResponseEntity.badRequest()
                     .body(new MensajeDto<>(true, "Error al consultar órdenes: " + e.getMessage(), null));
         }
@@ -107,18 +166,18 @@ public class MonitoringController {
     @PreAuthorize("hasRole('ADMIN') or hasRole('VENDEDOR') or hasRole('CAJERO')")
     public ResponseEntity<MensajeDto<List<Map<String, Object>>>> getOrdenesPagadas() {
         try {
-            log.info("MONITORING_API - Consultando órdenes pagadas");
+            log.info("💰 MONITORING_PAID_ORDERS - Consultando órdenes pagadas");
 
             List<Map<String, Object>> ordenesPagadas =
                     ordenService.getOrdenesPorEstadoForMonitoring(EstadoOrden.PAGADA);
 
+            log.info("✅ MONITORING_PAID_ORDERS_SUCCESS - Órdenes pagadas encontradas: {}", ordenesPagadas.size());
+
             return ResponseEntity.ok()
-                    .body(new MensajeDto<>(false,
-                            "Órdenes pagadas obtenidas exitosamente",
-                            ordenesPagadas));
+                    .body(new MensajeDto<>(false, "Órdenes pagadas obtenidas exitosamente", ordenesPagadas));
 
         } catch (Exception e) {
-            log.error("MONITORING_API_ERROR - Error consultando órdenes pagadas: {}", e.getMessage());
+            log.error("❌ MONITORING_API_ERROR - Error consultando órdenes pagadas: {}", e.getMessage());
             return ResponseEntity.badRequest()
                     .body(new MensajeDto<>(true, "Error al consultar órdenes pagadas: " + e.getMessage(), null));
         }
@@ -132,18 +191,18 @@ public class MonitoringController {
     @PreAuthorize("hasRole('ADMIN') or hasRole('VENDEDOR') or hasRole('CAJERO')")
     public ResponseEntity<MensajeDto<List<Map<String, Object>>>> getOrdenesDisponiblesParaPago() {
         try {
-            log.info("MONITORING_API - Consultando órdenes disponibles para pago");
+            log.info("🛒 MONITORING_AVAILABLE_ORDERS - Consultando órdenes disponibles para pago");
 
             List<Map<String, Object>> ordenesDisponibles =
                     ordenService.getOrdenesPorEstadoForMonitoring(EstadoOrden.DISPONIBLEPARAPAGO);
 
+            log.info("✅ MONITORING_AVAILABLE_ORDERS_SUCCESS - Órdenes disponibles: {}", ordenesDisponibles.size());
+
             return ResponseEntity.ok()
-                    .body(new MensajeDto<>(false,
-                            "Órdenes disponibles para pago obtenidas exitosamente",
-                            ordenesDisponibles));
+                    .body(new MensajeDto<>(false, "Órdenes disponibles para pago obtenidas exitosamente", ordenesDisponibles));
 
         } catch (Exception e) {
-            log.error("MONITORING_API_ERROR - Error consultando órdenes disponibles: {}", e.getMessage());
+            log.error("❌ MONITORING_API_ERROR - Error consultando órdenes disponibles: {}", e.getMessage());
             return ResponseEntity.badRequest()
                     .body(new MensajeDto<>(true, "Error al consultar órdenes disponibles: " + e.getMessage(), null));
         }
@@ -157,11 +216,10 @@ public class MonitoringController {
     @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<MensajeDto<Map<String, Object>>> getEstadisticas() {
         try {
-            log.info("MONITORING_API - Generando estadísticas rápidas");
+            log.info("📊 MONITORING_STATS - Generando estadísticas rápidas");
 
             Map<String, Object> summary = ordenService.getOrdenesSummaryForMonitoring();
 
-            // Extraer solo las estadísticas clave para un vistazo rápido
             Map<String, Object> estadisticas = Map.of(
                     "totalOrdenes", summary.get("totalOrdenes"),
                     "totalPagadas", summary.get("totalPagadas"),
@@ -169,67 +227,15 @@ public class MonitoringController {
                     "timestamp", summary.get("timestamp")
             );
 
+            log.info("✅ MONITORING_STATS_SUCCESS - Estadísticas generadas");
+
             return ResponseEntity.ok()
                     .body(new MensajeDto<>(false, "Estadísticas obtenidas exitosamente", estadisticas));
 
         } catch (Exception e) {
-            log.error("MONITORING_API_ERROR - Error generando estadísticas: {}", e.getMessage());
+            log.error("❌ MONITORING_API_ERROR - Error generando estadísticas: {}", e.getMessage());
             return ResponseEntity.badRequest()
                     .body(new MensajeDto<>(true, "Error al generar estadísticas: " + e.getMessage(), null));
         }
-    }
-
-    /**
-     * ✅ ENDPOINT PARA VERIFICAR SALUD DEL MONITOREO
-     * URL: GET /api/monitoring/health
-     */
-    /**
-     * ✅ ENDPOINT PARA VERIFICAR SALUD DEL MONITOREO
-     * URL: GET /api/monitoring/health
-     */
-
-    @GetMapping("/monitoring/health")
-    public ResponseEntity<MensajeDto<Map<String, Object>>> monitoringHealth() {
-        try {
-            log.info("🔴 MONITORING_HEALTH - Health check solicitado");
-
-            Map<String, Object> health = Map.of(
-                    "status", "healthy",
-                    "service", "monitoring",
-                    "timestamp", java.time.LocalDateTime.now().toString()
-            );
-
-            return ResponseEntity.ok(new MensajeDto<>(false, "Sistema funcionando", health));
-
-        } catch (Exception e) {
-            log.error("MONITORING_HEALTH_ERROR - Error: {}", e.getMessage());
-            return ResponseEntity.internalServerError()
-                    .body(new MensajeDto<>(true, "Error en health check", null));
-        }
-    }
-
-    @GetMapping("/monitoring/ordenes/{id}/estado")
-    @PreAuthorize("hasRole('ADMIN') or hasRole('VENDEDOR') or hasRole('CAJERO')")
-    public ResponseEntity<MensajeDto<Map<String, Object>>> getOrdenStatusMonitoring(@PathVariable("id") Long id) {
-        try {
-            log.info("MONITORING_ORDER_STATUS - Consultando orden: {}", id);
-
-            // Usa el servicio existente
-            Map<String, Object> status = ordenService.getOrdenStatusForMonitoring(id);
-
-            if (status.containsKey("error")) {
-                return ResponseEntity.status(404)
-                        .body(new MensajeDto<>(true, "Orden no encontrada", status));
-            }
-
-            return ResponseEntity.ok()
-                    .body(new MensajeDto<>(false, "Estado obtenido exitosamente", status));
-
-        } catch (Exception e) {
-            log.error("MONITORING_ORDER_STATUS_ERROR - Error: {}", e.getMessage());
-            return ResponseEntity.badRequest()
-                    .body(new MensajeDto<>(true, "Error consultando orden", null));
-        }
-
     }
 }
