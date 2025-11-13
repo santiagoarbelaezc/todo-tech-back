@@ -40,7 +40,7 @@ public class SecurityConfig {
                 .sessionManagement(session ->
                         session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
-                        // 🔓 ENDPOINTS PÚBLICOS (sin autenticación)
+                        // 🔓 ENDPOINTS PÚBLICOS (sin autenticación) - ✅ AGREGADOS MONITORING
                         .requestMatchers(
                                 "/usuarios/login",
                                 "/usuarios/recordar-contrasena",
@@ -48,7 +48,9 @@ public class SecurityConfig {
                                 "/stripe/**",
                                 "/paypal/**",
                                 "/health",
-                                "/"
+                                "/",
+                                "/api/monitoring/health",        // ✅ NUEVO
+                                "/api/monitoring/test"           // ✅ NUEVO
                         ).permitAll()
 
                         // 🔐 ENDPOINTS QUE REQUIEREN AUTENTICACIÓN BÁSICA
@@ -74,10 +76,12 @@ public class SecurityConfig {
         // ✅ ORÍGENES PERMITIDOS - AGREGADA LA URL DE CLOUDFRONT
         configuration.setAllowedOrigins(Arrays.asList(
                 "https://todotechshopfrontend.web.app",  // Firebase
-                "https://d2jctboz5xbevf.cloudfront.net", // ← NUEVO: CloudFront
+                "https://d2jctboz5xbevf.cloudfront.net", // CloudFront
                 "http://localhost:4200",                 // Desarrollo local
                 "https://localhost:4200",                // Desarrollo local HTTPS
-                "http://todotech-frontend.s3-website.us-east-2.amazonaws.com"
+                "http://todotech-frontend.s3-website.us-east-2.amazonaws.com",
+                "https://www.postman.com",               // ✅ NUEVO: Postman
+                "https://web.postman.co"                 // ✅ NUEVO: Postman web
         ));
 
         // ✅ MÉTODOS HTTP PERMITIDOS
