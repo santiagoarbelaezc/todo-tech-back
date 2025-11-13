@@ -183,8 +183,12 @@ public class MonitoringController {
      * ✅ ENDPOINT PARA VERIFICAR SALUD DEL MONITOREO
      * URL: GET /api/monitoring/health
      */
+    /**
+     * ✅ ENDPOINT PARA VERIFICAR SALUD DEL MONITOREO
+     * URL: GET /api/monitoring/health
+     */
     @GetMapping("/health")
-    @PreAuthorize("isAuthenticated()")
+// @PreAuthorize("isAuthenticated()")  // ❌ REMOVER temporalmente
     public ResponseEntity<MensajeDto<Map<String, Object>>> getHealthCheck() {
         try {
             log.info("MONITORING_API - Verificando salud del sistema de monitoreo");
@@ -209,5 +213,18 @@ public class MonitoringController {
             return ResponseEntity.internalServerError()
                     .body(new MensajeDto<>(true, "Error en sistema de monitoreo: " + e.getMessage(), null));
         }
+    }
+
+    @GetMapping("/test")
+    public ResponseEntity<Map<String, String>> testEndpoint() {
+        log.info("🔴 TEST_LOG - Este es un mensaje de prueba para CloudWatch");
+        log.info("🟢 MONITORING_TEST - orderId: 999, status: TEST, paid: true, amount: 100.50");
+        log.info("🟡 MONITORING_API - Test endpoint ejecutado correctamente");
+
+        return ResponseEntity.ok(Map.of(
+                "status", "success",
+                "message", "Logs de prueba generados para CloudWatch",
+                "timestamp", java.time.LocalDateTime.now().toString()
+        ));
     }
 }
