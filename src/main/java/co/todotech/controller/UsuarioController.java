@@ -188,7 +188,7 @@ public class UsuarioController {
 
     // Eliminar usuario - SOLO ADMIN
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('ADMIN') and @usuarioServiceImpl.esAdminConPermisosEliminacion()")
     public ResponseEntity<MensajeDto<String>> eliminarUsuario(@PathVariable("id") Long id) {
         try {
             log.info("👤 USER_DELETE - Iniciando eliminación de usuario ID: {}", id);

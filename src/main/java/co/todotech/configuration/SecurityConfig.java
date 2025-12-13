@@ -49,8 +49,8 @@ public class SecurityConfig {
                                 "/paypal/**",
                                 "/health",
                                 "/",
-                                "/api/monitoring/health",        // ✅ NUEVO
-                                "/api/monitoring/test"           // ✅ NUEVO
+                                "/api/monitoring/health",
+                                "/api/monitoring/test"   // ✅ AGREGAR ESTA LÍNEA NUEVA
                         ).permitAll()
 
                         // 🔐 ENDPOINTS QUE REQUIEREN AUTENTICACIÓN BÁSICA

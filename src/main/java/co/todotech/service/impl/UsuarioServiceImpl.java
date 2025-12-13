@@ -13,6 +13,10 @@ import co.todotech.service.UsuarioService;
 import co.todotech.utils.EmailService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -35,6 +39,26 @@ public class UsuarioServiceImpl implements UsuarioService {
     private final JwtUtil jwtUtil;
     private final PasswordEncoder passwordEncoder;
     private final TokenBlacklistService tokenBlacklistService;
+
+    // Propiedades del admin desde application.properties
+    @Value("${admin.username}")
+    private String adminUsername;
+
+    @Value("${admin.cedula}")
+    private String adminCedula;
+
+    @Value("${admin.email}")
+    private String adminEmail;
+
+    // Propiedades para el admin de prueba que no puede eliminar
+    @Value("${admin.prueba.cedula:300000001}")
+    private String adminPruebaCedula;
+
+    @Value("${admin.prueba.username:adminprueba}")
+    private String adminPruebaUsername;
+
+    @Value("${admin.prueba.email:prueba.admin999@gmail.com}")
+    private String adminPruebaEmail;
 
     @Override
     public LoginResponse login(String nombreUsuario, String contrasena) {
@@ -88,6 +112,11 @@ public class UsuarioServiceImpl implements UsuarioService {
             throw new UsuarioBusinessException("El correo electrónico es requerido");
         }
 
+        // No permitir recordatorio para los admins
+        if (correo.equals(adminEmail) || correo.equals(adminPruebaEmail)) {
+            throw new UsuarioBusinessException("El administrador no puede solicitar recordatorio de contraseña");
+        }
+
         List<TipoUsuario> tiposPermitidos = Arrays.asList(
                 TipoUsuario.VENDEDOR,
                 TipoUsuario.CAJERO,
@@ -126,11 +155,22 @@ public class UsuarioServiceImpl implements UsuarioService {
     public UsuarioDto obtenerUsuarioPorId(Long id) {
         Usuario usuario = usuarioRepository.findById(id)
                 .orElseThrow(() -> new UsuarioNotFoundException("Usuario no encontrado con ID: " + id));
+
+        // Proteger al admin principal de ser obtenido
+        if (esUsuarioAdminPrincipal(usuario)) {
+            throw new UsuarioProtectedException("No se puede acceder al usuario administrador principal");
+        }
+
         return usuarioMapper.toDto(usuario);
     }
 
     @Override
     public UsuarioDto obtenerUsuarioPorCedula(String cedula) {
+        // Proteger la cédula del admin principal
+        if (cedula.equals(adminCedula)) {
+            throw new UsuarioProtectedException("No se puede acceder al usuario administrador principal");
+        }
+
         Usuario usuario = usuarioRepository.findByCedula(cedula)
                 .orElseThrow(() -> new UsuarioNotFoundException("Usuario no encontrado con cédula: " + cedula));
         return usuarioMapper.toDto(usuario);
@@ -158,19 +198,76 @@ public class UsuarioServiceImpl implements UsuarioService {
     @Override
     @Transactional
     public void cambiarEstadoUsuario(Long id, boolean estado) {
+        // 1. Obtener usuario autenticado PRIMERO
+        Usuario usuarioAutenticado = obtenerUsuarioAutenticado();
+
+        // 2. BLOQUEAR admin de prueba INMEDIATAMENTE
+        if (esUsuarioAdminPrueba(usuarioAutenticado)) {
+            log.error("🚫 ADMIN PRUEBA BLOQUEADO - {} intentó cambiar estado de usuario",
+                    usuarioAutenticado.getNombreUsuario());
+            throw new UsuarioNoAutorizadoException(
+                    "El administrador de prueba '" + usuarioAutenticado.getNombreUsuario() +
+                            "' no tiene permisos para cambiar estados de usuario."
+            );
+        }
+
+        // 3. Obtener usuario a modificar
         Usuario usuario = usuarioRepository.findById(id)
                 .orElseThrow(() -> new UsuarioNotFoundException("Usuario no encontrado con ID: " + id));
+
+        // 4. Proteger al admin principal
+        if (esUsuarioAdminPrincipal(usuario)) {
+            throw new UsuarioProtectedException("No se puede modificar el estado del administrador principal");
+        }
+
+        // 5. Si intenta desactivar otro ADMIN, verificar permisos
+        if (usuario.getTipoUsuario() == TipoUsuario.ADMIN && !estado) {
+            // Solo el admin principal puede desactivar otros admins
+            if (!esUsuarioAdminPrincipal(usuarioAutenticado)) {
+                throw new UsuarioNoAutorizadoException(
+                        "Solo el administrador principal puede desactivar otros administradores."
+                );
+            }
+        }
 
         usuario.setEstado(estado);
         usuarioRepository.save(usuario);
 
-        log.info("Estado del usuario {} cambiado a: {}", id, estado ? "ACTIVO" : "INACTIVO");
+        log.info("Usuario {} cambió estado de usuario {} a: {}",
+                usuarioAutenticado.getNombreUsuario(),
+                usuario.getNombreUsuario(),
+                estado ? "ACTIVO" : "INACTIVO");
     }
 
     @Override
     @Transactional
     public void crearUsuario(UsuarioDto dto) {
         log.info("Creando usuario: {}", dto.getNombreUsuario());
+
+        // Obtener el usuario autenticado que está haciendo la petición
+        Usuario usuarioAutenticado = obtenerUsuarioAutenticado();
+
+        // Verificar permisos para crear administradores
+        if (dto.getTipoUsuario() == TipoUsuario.ADMIN) {
+            // Solo el admin principal puede crear otros administradores
+            if (!esUsuarioAdminPrincipal(usuarioAutenticado)) {
+                throw new UsuarioNoAutorizadoException("No está autorizado para crear usuarios administradores. Solo el administrador principal puede crear otros administradores.");
+            }
+            log.info("Admin principal {} está creando un nuevo administrador", usuarioAutenticado.getNombreUsuario());
+        }
+
+        // No permitir crear usuario con credenciales del admin principal o de prueba
+        if (dto.getCedula().equals(adminCedula) || dto.getCedula().equals(adminPruebaCedula)) {
+            throw new UsuarioProtectedException("No se puede usar una cédula de administrador reservada");
+        }
+
+        if (dto.getCorreo().equals(adminEmail) || dto.getCorreo().equals(adminPruebaEmail)) {
+            throw new UsuarioProtectedException("No se puede usar un correo de administrador reservado");
+        }
+
+        if (dto.getNombreUsuario().equals(adminUsername) || dto.getNombreUsuario().equals(adminPruebaUsername)) {
+            throw new UsuarioProtectedException("No se puede usar un nombre de usuario de administrador reservado");
+        }
 
         if (usuarioRepository.existsByCedula(dto.getCedula())) {
             throw new UsuarioDuplicateException("Ya existe un usuario con la cédula: " + dto.getCedula());
@@ -197,7 +294,9 @@ public class UsuarioServiceImpl implements UsuarioService {
         usuario.setContrasena(contrasenaEncriptada);
 
         usuarioRepository.save(usuario);
-        log.info("Usuario creado exitosamente: {}", usuario.getNombreUsuario());
+        log.info("Usuario {} creado exitosamente por: {}",
+                usuario.getNombreUsuario(),
+                usuarioAutenticado.getNombreUsuario());
     }
 
     @Override
@@ -205,6 +304,24 @@ public class UsuarioServiceImpl implements UsuarioService {
     public void actualizarUsuario(Long id, UsuarioDto dto) {
         Usuario usuario = usuarioRepository.findById(id)
                 .orElseThrow(() -> new UsuarioNotFoundException("Usuario no encontrado con ID: " + id));
+
+        // Proteger al admin principal de actualizaciones
+        if (esUsuarioAdminPrincipal(usuario)) {
+            throw new UsuarioProtectedException("No se puede modificar al administrador principal");
+        }
+
+        // Obtener el usuario autenticado
+        Usuario usuarioAutenticado = obtenerUsuarioAutenticado();
+
+        // Si se intenta cambiar el tipo a ADMIN, verificar permisos
+        if (dto.getTipoUsuario() == TipoUsuario.ADMIN && usuario.getTipoUsuario() != TipoUsuario.ADMIN) {
+            // Solo el admin principal puede convertir usuarios en administradores
+            if (!esUsuarioAdminPrincipal(usuarioAutenticado)) {
+                throw new UsuarioNoAutorizadoException("No está autorizado para convertir usuarios en administradores. Solo el administrador principal puede hacerlo.");
+            }
+            log.info("Admin principal {} está convirtiendo al usuario {} en administrador",
+                    usuarioAutenticado.getNombreUsuario(), usuario.getNombreUsuario());
+        }
 
         // Verificar si la cédula/correo ya existen en otros usuarios
         if (!usuario.getCedula().equals(dto.getCedula()) &&
@@ -220,6 +337,19 @@ public class UsuarioServiceImpl implements UsuarioService {
         if (!usuario.getNombreUsuario().equals(dto.getNombreUsuario()) &&
                 usuarioRepository.existsByNombreUsuarioAndIdNot(dto.getNombreUsuario(), id)) {
             throw new UsuarioDuplicateException("Ya existe otro usuario con el nombre de usuario: " + dto.getNombreUsuario());
+        }
+
+        // Validar que no se intente usar credenciales de admins reservados
+        if (dto.getCedula().equals(adminCedula) || dto.getCedula().equals(adminPruebaCedula)) {
+            throw new UsuarioProtectedException("No se puede usar una cédula de administrador reservada");
+        }
+
+        if (dto.getCorreo().equals(adminEmail) || dto.getCorreo().equals(adminPruebaEmail)) {
+            throw new UsuarioProtectedException("No se puede usar un correo de administrador reservado");
+        }
+
+        if (dto.getNombreUsuario().equals(adminUsername) || dto.getNombreUsuario().equals(adminPruebaUsername)) {
+            throw new UsuarioProtectedException("No se puede usar un nombre de usuario de administrador reservado");
         }
 
         // Actualizar campos EXCEPTO la contraseña
@@ -244,11 +374,110 @@ public class UsuarioServiceImpl implements UsuarioService {
     @Override
     @Transactional
     public void eliminarUsuario(Long id) {
-        Usuario usuario = usuarioRepository.findById(id)
-                .orElseThrow(() -> new UsuarioNotFoundException("Usuario no encontrado con ID: " + id));
+        log.info("=== INICIANDO ELIMINACIÓN DE USUARIO ===");
 
-        usuarioRepository.delete(usuario);
-        log.info("Usuario eliminado físicamente: {}", id);
+        // ✅ **PASO 1: OBTENER Y VALIDAR USUARIO AUTENTICADO PRIMERO**
+        Usuario usuarioAutenticado = obtenerUsuarioAutenticado();
+
+        log.info("Usuario autenticado: {} (ID: {}, Tipo: {}, Cédula: {})",
+                usuarioAutenticado.getNombreUsuario(),
+                usuarioAutenticado.getId(),
+                usuarioAutenticado.getTipoUsuario(),
+                usuarioAutenticado.getCedula());
+
+        // ✅ **PASO 2: BLOQUEAR INMEDIATAMENTE AL ADMIN DE PRUEBA**
+        if (esUsuarioAdminPrueba(usuarioAutenticado)) {
+            log.error("🚫🚫🚫 BLOQUEO ADMIN PRUEBA - {} intentó eliminar usuario",
+                    usuarioAutenticado.getNombreUsuario());
+            throw new UsuarioNoAutorizadoException(
+                    "ACCESO DENEGADO: El administrador de prueba '" +
+                            usuarioAutenticado.getNombreUsuario() +
+                            "' NO tiene permisos para eliminar usuarios. " +
+                            "Esta cuenta es solo para consultas y operaciones básicas."
+            );
+        }
+
+        // ✅ **PASO 3: Solo ahora obtener el usuario a eliminar**
+        Usuario usuarioAEliminar = usuarioRepository.findById(id)
+                .orElseThrow(() -> {
+                    log.error("❌ USUARIO_NO_ENCONTRADO - ID: {}", id);
+                    return new UsuarioNotFoundException("Usuario no encontrado con ID: " + id);
+                });
+
+        log.info("Usuario a eliminar: {} (ID: {}, Tipo: {})",
+                usuarioAEliminar.getNombreUsuario(),
+                usuarioAEliminar.getId(),
+                usuarioAEliminar.getTipoUsuario());
+
+        // 4. Proteger al admin principal de ser eliminado
+        if (esUsuarioAdminPrincipal(usuarioAEliminar)) {
+            log.warn("⚠️ INTENTO_ELIMINAR_ADMIN_PRINCIPAL - Usuario {} intentó eliminar al admin principal",
+                    usuarioAutenticado.getNombreUsuario());
+            throw new UsuarioProtectedException("No se puede eliminar al administrador principal");
+        }
+
+        // 5. Validar que no se elimine a sí mismo
+        if (usuarioAEliminar.getId().equals(usuarioAutenticado.getId())) {
+            log.warn("⚠️ INTENTO_AUTOELIMINACION - Usuario {} intentó eliminarse a sí mismo",
+                    usuarioAutenticado.getNombreUsuario());
+            throw new UsuarioNoAutorizadoException("No puede eliminarse a sí mismo.");
+        }
+
+        // 6. Validar permisos jerárquicos (solo queda validar para admins principales)
+        if (usuarioAEliminar.getTipoUsuario() == TipoUsuario.ADMIN) {
+            // Solo el admin principal puede eliminar a otros administradores
+            if (!esUsuarioAdminPrincipal(usuarioAutenticado)) {
+                log.warn("⚠️ PERMISOS_INSUFICIENTES - Usuario {} intentó eliminar admin {} sin permisos",
+                        usuarioAutenticado.getNombreUsuario(), usuarioAEliminar.getNombreUsuario());
+                throw new UsuarioNoAutorizadoException(
+                        "No está autorizado para eliminar usuarios administradores. " +
+                                "Solo el administrador principal puede eliminar otros administradores."
+                );
+            }
+            log.info("✅ Admin principal eliminando otro admin");
+        } else {
+            // Para VENDEDOR/CAJERO/DESPACHADOR, verificar que sea ADMIN
+            if (usuarioAutenticado.getTipoUsuario() != TipoUsuario.ADMIN) {
+                log.warn("⚠️ NO_ES_ADMIN - Usuario {} (no admin) intentó eliminar usuario {}",
+                        usuarioAutenticado.getNombreUsuario(), usuarioAEliminar.getNombreUsuario());
+                throw new UsuarioNoAutorizadoException(
+                        "No está autorizado para eliminar usuarios. " +
+                                "Solo los administradores pueden eliminar usuarios."
+                );
+            }
+            log.info("✅ Admin eliminando usuario no-admin");
+        }
+
+        // 7. Advertencia sobre posibles FK constraints
+        log.warn("⚠️ ADVERTENCIA - El usuario {} puede tener datos asociados (órdenes de venta, etc.).",
+                usuarioAEliminar.getNombreUsuario());
+
+        // 8. Intentar eliminar (manejar FK constraints)
+        try {
+            usuarioRepository.delete(usuarioAEliminar);
+            log.info("✅ ELIMINACIÓN_EXITOSA - Usuario {} eliminado por {}",
+                    usuarioAEliminar.getNombreUsuario(), usuarioAutenticado.getNombreUsuario());
+
+        } catch (Exception e) {
+            log.error("❌ ERROR_ELIMINACION_FK - No se puede eliminar usuario {}: {}",
+                    usuarioAEliminar.getNombreUsuario(), e.getMessage());
+
+            // Identificar si es error de FK
+            if (e.getMessage().contains("violates foreign key constraint") ||
+                    e.getMessage().contains("is still referenced")) {
+                throw new UsuarioBusinessException(
+                        "No se puede eliminar el usuario '" + usuarioAEliminar.getNombreUsuario() +
+                                "' porque tiene datos asociados (órdenes de venta, etc.). " +
+                                "Recomendación: Desactive el usuario usando el endpoint de cambio de estado " +
+                                "(PATCH /usuarios/" + id + "/estado?estado=false)."
+                );
+            }
+
+            // Otro tipo de error
+            throw new UsuarioBusinessException("Error al eliminar usuario: " + e.getMessage());
+        }
+
+        log.info("=== FIN ELIMINACIÓN DE USUARIO ===");
     }
 
     @Override
@@ -257,7 +486,10 @@ public class UsuarioServiceImpl implements UsuarioService {
         if (usuarios.isEmpty()) {
             throw new UsuarioNotFoundException("No se encontraron usuarios del tipo: " + tipoUsuario);
         }
+
+        // Filtrar el admin principal de los resultados
         return usuarios.stream()
+                .filter(usuario -> !esUsuarioAdminPrincipal(usuario))
                 .map(usuarioMapper::toDto)
                 .collect(Collectors.toList());
     }
@@ -268,18 +500,29 @@ public class UsuarioServiceImpl implements UsuarioService {
         if (usuarios.isEmpty()) {
             throw new UsuarioNotFoundException("No se encontraron usuarios con el nombre: " + nombre);
         }
+
+        // Filtrar el admin principal de los resultados
         return usuarios.stream()
+                .filter(usuario -> !esUsuarioAdminPrincipal(usuario))
                 .map(usuarioMapper::toDto)
                 .collect(Collectors.toList());
     }
 
     @Override
     public List<UsuarioDto> buscarUsuariosPorCedula(String cedula) {
+        // Si buscan la cédula del admin principal, retornar lista vacía
+        if (cedula.equals(adminCedula)) {
+            return Collections.emptyList();
+        }
+
         List<Usuario> usuarios = usuarioRepository.findByCedulaContaining(cedula);
         if (usuarios.isEmpty()) {
             throw new UsuarioNotFoundException("No se encontraron usuarios con la cédula: " + cedula);
         }
+
+        // Filtrar cualquier coincidencia con admin principal
         return usuarios.stream()
+                .filter(usuario -> !esUsuarioAdminPrincipal(usuario))
                 .map(usuarioMapper::toDtoSafe)
                 .collect(Collectors.toList());
     }
@@ -300,6 +543,8 @@ public class UsuarioServiceImpl implements UsuarioService {
 
             log.debug("Iniciando mapeo de entities a DTOs...");
             List<UsuarioDto> usuariosDto = usuariosEntities.stream()
+                    // EXCLUIR AL USUARIO ADMIN PRINCIPAL
+                    .filter(usuario -> !esUsuarioAdminPrincipal(usuario))
                     .map(usuario -> {
                         log.trace("Mapeando usuario ID: {}, Nombre: {}", usuario.getId(), usuario.getNombre());
                         log.trace("Contraseña en Entity: {}", usuario.getContrasena());
@@ -315,6 +560,7 @@ public class UsuarioServiceImpl implements UsuarioService {
                     .collect(Collectors.toList());
 
             log.info("Mapeo completado. Total DTOs generados: {}", usuariosDto.size());
+            log.info("Usuario admin principal excluido de los resultados");
 
             // Log final de verificación
             usuariosDto.forEach(dto -> {
@@ -334,6 +580,8 @@ public class UsuarioServiceImpl implements UsuarioService {
     @Override
     public List<UsuarioDto> obtenerUsuariosActivos() {
         return usuarioRepository.findByEstado(true).stream()
+                // Excluir al admin principal de los resultados
+                .filter(usuario -> !esUsuarioAdminPrincipal(usuario))
                 .map(usuarioMapper::toDtoSafe)
                 .collect(Collectors.toList());
     }
@@ -341,6 +589,8 @@ public class UsuarioServiceImpl implements UsuarioService {
     @Override
     public List<UsuarioDto> obtenerUsuariosInactivos() {
         return usuarioRepository.findByEstado(false).stream()
+                // Excluir al admin principal de los resultados
+                .filter(usuario -> !esUsuarioAdminPrincipal(usuario))
                 .map(usuarioMapper::toDtoSafe)
                 .collect(Collectors.toList());
     }
@@ -351,7 +601,10 @@ public class UsuarioServiceImpl implements UsuarioService {
         if (usuarios.isEmpty()) {
             throw new UsuarioNotFoundException("No se encontraron usuarios en el rango de fechas especificado");
         }
+
+        // Filtrar el admin principal de los resultados
         return usuarios.stream()
+                .filter(usuario -> !esUsuarioAdminPrincipal(usuario))
                 .map(usuarioMapper::toDtoSafe)
                 .collect(Collectors.toList());
     }
@@ -362,7 +615,10 @@ public class UsuarioServiceImpl implements UsuarioService {
         if (usuarios.isEmpty()) {
             throw new UsuarioNotFoundException("No se encontraron usuarios creados después de: " + fecha);
         }
+
+        // Filtrar el admin principal de los resultados
         return usuarios.stream()
+                .filter(usuario -> !esUsuarioAdminPrincipal(usuario))
                 .map(usuarioMapper::toDtoSafe)
                 .collect(Collectors.toList());
     }
@@ -373,8 +629,175 @@ public class UsuarioServiceImpl implements UsuarioService {
         if (usuarios.isEmpty()) {
             throw new UsuarioNotFoundException("No se encontraron usuarios creados antes de: " + fecha);
         }
+
+        // Filtrar el admin principal de los resultados
         return usuarios.stream()
+                .filter(usuario -> !esUsuarioAdminPrincipal(usuario))
                 .map(usuarioMapper::toDtoSafe)
                 .collect(Collectors.toList());
+    }
+
+    /**
+     * Método auxiliar para verificar si un usuario es el administrador principal (del .env)
+     */
+    private boolean esUsuarioAdminPrincipal(Usuario usuario) {
+        return usuario.getCedula().equals(adminCedula) &&
+                usuario.getCorreo().equals(adminEmail) &&
+                usuario.getNombreUsuario().equals(adminUsername);
+    }
+
+    /**
+     * Método auxiliar para verificar si un usuario es el administrador de prueba
+     */
+    /**
+     * Método auxiliar para verificar si un usuario es el administrador de prueba
+     */
+    private boolean esUsuarioAdminPrueba(Usuario usuario) {
+        // Verificar por múltiples criterios (username y email son más confiables)
+        boolean esPrueba = usuario.getNombreUsuario().equals(adminPruebaUsername)
+                && usuario.getCorreo().equals(adminPruebaEmail);
+
+        // Log para debug
+        log.debug("Validando si es admin prueba - Username: {} (esperado: {}), Email: {} (esperado: {}), Resultado: {}",
+                usuario.getNombreUsuario(), adminPruebaUsername,
+                usuario.getCorreo(), adminPruebaEmail,
+                esPrueba);
+
+        return esPrueba;
+    }
+
+    /**
+     * Método MEJORADO para obtener el usuario autenticado actualmente
+     */
+    private Usuario obtenerUsuarioAutenticado() {
+        try {
+            Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+
+            if (authentication == null) {
+                log.error("❌ NO_HAY_AUTENTICACION - No hay información de autenticación en el contexto");
+                throw new UsuarioBusinessException("No se pudo identificar al usuario autenticado");
+            }
+
+            // Verificar que esté autenticado
+            if (!authentication.isAuthenticated()) {
+                log.error("❌ USUARIO_NO_AUTENTICADO - El usuario no está autenticado");
+                throw new UsuarioBusinessException("Usuario no autenticado");
+            }
+
+            String username;
+            Object principal = authentication.getPrincipal();
+
+            if (principal instanceof UserDetails) {
+                username = ((UserDetails) principal).getUsername();
+            } else if (principal instanceof String) {
+                username = (String) principal;
+
+                // Si es "anonymousUser" significa que no hay usuario autenticado
+                if ("anonymousUser".equals(username)) {
+                    log.error("❌ USUARIO_ANONIMO - Intento de acceso con usuario anónimo");
+                    throw new UsuarioBusinessException("Acceso no autorizado - usuario anónimo");
+                }
+            } else {
+                log.error("❌ TIPO_PRINCIPAL_DESCONOCIDO - Tipo de principal no reconocido: {}",
+                        principal.getClass().getName());
+                throw new UsuarioBusinessException("Error al identificar el usuario autenticado");
+            }
+
+            // Buscar usuario en base de datos
+            Usuario usuario = usuarioRepository.findByNombreUsuario(username)
+                    .orElseThrow(() -> {
+                        log.error("❌ USUARIO_NO_ENCONTRADO - Usuario del token no encontrado en BD: {}", username);
+                        return new UsuarioNotFoundException("Usuario autenticado no encontrado en el sistema");
+                    });
+
+            log.debug("✅ USUARIO_AUTENTICADO_IDENTIFICADO - Usuario autenticado: {} (ID: {})",
+                    usuario.getNombreUsuario(), usuario.getId());
+
+            return usuario;
+
+        } catch (UsuarioNotFoundException | UsuarioBusinessException e) {
+            // Relanzar excepciones específicas
+            throw e;
+        } catch (Exception e) {
+            log.error("❌ ERROR_OBTENIENDO_USUARIO_AUTENTICADO - Error inesperado: {}", e.getMessage(), e);
+            throw new UsuarioBusinessException("Error al obtener información del usuario autenticado: " + e.getMessage());
+        }
+    }
+
+    public boolean esAdminConPermisosEliminacion() {
+        try {
+            Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+
+            if (authentication == null || !authentication.isAuthenticated()) {
+                // Esto NO lanza AccessDeniedException de Spring
+                throw new co.todotech.exception.security.CustomAccessDeniedException(
+                        "Usuario no autenticado"
+                );
+            }
+
+            String username = authentication.getName();
+
+            // ✅ **BLOQUEO ESPECÍFICO PARA ADMIN PRUEBA**
+            if (username.equals(adminPruebaUsername)) {
+                log.warn("🚫 ADMIN PRUEBA BLOQUEADO - Usuario: {}", username);
+                throw new co.todotech.exception.security.CustomAccessDeniedException(
+                        "El administrador de prueba '" + username +
+                                "' no tiene permisos para eliminar usuarios. " +
+                                "Esta cuenta es solo para consultas y operaciones básicas. " +
+                                "Use el endpoint de cambio de estado (/usuarios/{id}/estado) para desactivar usuarios."
+                );
+            }
+
+            Usuario usuarioAutenticado = usuarioRepository.findByNombreUsuario(username)
+                    .orElseThrow(() -> new UsuarioNotFoundException("Usuario no encontrado"));
+
+            // ✅ **DOBLE VALIDACIÓN POR EMAIL**
+            if (usuarioAutenticado.getCorreo().equals(adminPruebaEmail)) {
+                throw new co.todotech.exception.security.CustomAccessDeniedException(
+                        "Cuenta de administrador de prueba detectada. " +
+                                "Operación de eliminación no permitida. " +
+                                "Contacte al administrador principal si necesita eliminar un usuario."
+                );
+            }
+
+            // Solo admins principales pueden eliminar
+            boolean tienePermisos = usuarioAutenticado.getTipoUsuario() == TipoUsuario.ADMIN
+                    && esUsuarioAdminPrincipal(usuarioAutenticado);
+
+            if (!tienePermisos) {
+                throw new co.todotech.exception.security.CustomAccessDeniedException(
+                        "No tiene permisos para eliminar usuarios. " +
+                                "Solo el administrador principal puede eliminar usuarios."
+                );
+            }
+
+            return true;
+
+        } catch (co.todotech.exception.security.CustomAccessDeniedException e) {
+            // Relanzar para que GlobalExceptionHandler la capture
+            throw e;
+        } catch (UsuarioNotFoundException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("Error validando permisos eliminación: {}", e.getMessage());
+            throw new UsuarioBusinessException("Error al validar permisos: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Método PÚBLICO para que Spring Security pueda usarlo en @PreAuthorize
+     * Verifica si el usuario autenticado actual puede crear administradores
+     */
+    public boolean puedeCrearAdministradores() {
+        try {
+            Usuario usuarioAutenticado = obtenerUsuarioAutenticado();
+
+            // Solo el admin principal puede crear otros administradores
+            return esUsuarioAdminPrincipal(usuarioAutenticado);
+
+        } catch (Exception e) {
+            log.error("❌ ERROR_VALIDANDO_PERMISOS_CREACION_ADMIN - Error al validar permisos para crear administradores: {}", e.getMessage());
+            return false;
+        }
     }
 }

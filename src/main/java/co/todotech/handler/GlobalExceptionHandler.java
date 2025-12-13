@@ -5,6 +5,7 @@ import co.todotech.exception.ordenventa.OrdenNotFoundException;
 import co.todotech.exception.producto.ProductoBusinessException;
 import co.todotech.exception.producto.ProductoDuplicateException;
 import co.todotech.exception.producto.ProductoNotFoundException;
+import co.todotech.exception.security.CustomAccessDeniedException;
 import co.todotech.exception.usuario.*;
 import co.todotech.model.dto.MensajeDto;
 import lombok.extern.slf4j.Slf4j;
@@ -145,6 +146,114 @@ public class GlobalExceptionHandler {
         log.warn("Error en envío de email: {}", ex.getMessage());
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                 .body(new MensajeDto<>(true, ex.getMessage()));
+    }
+
+    // 🔥🔥🔥 Manejadores CORREGIDOS - TODOS con BAD_REQUEST (400) 🔥🔥🔥
+
+    @ExceptionHandler(UsuarioNoAutorizadoException.class)
+    public ResponseEntity<MensajeDto<?>> handleUsuarioNoAutorizadoException(UsuarioNoAutorizadoException ex) {
+        log.warn("Acceso no autorizado: {}", ex.getMessage());
+        // 🔴 CAMBIADO de FORBIDDEN (403) a BAD_REQUEST (400)
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(new MensajeDto<>(true, ex.getMessage()));
+    }
+
+    @ExceptionHandler(UsuarioProtectedException.class)
+    public ResponseEntity<MensajeDto<?>> handleUsuarioProtectedException(UsuarioProtectedException ex) {
+        log.warn("Usuario protegido: {}", ex.getMessage());
+        // 🔴 CAMBIADO de FORBIDDEN (403) a BAD_REQUEST (400)
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(new MensajeDto<>(true, ex.getMessage()));
+    }
+
+    @ExceptionHandler(CustomAccessDeniedException.class)
+    public ResponseEntity<MensajeDto<?>> handleCustomAccessDeniedException(CustomAccessDeniedException ex) {
+        // Obtener usuario actual para log
+        String username = "usuario desconocido";
+        try {
+            org.springframework.security.core.Authentication auth =
+                    org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication();
+            if (auth != null && auth.isAuthenticated()) {
+                username = auth.getName();
+            }
+        } catch (Exception e) {
+            // Ignorar
+        }
+
+        log.warn("Acceso denegado personalizado para usuario '{}': {}", username, ex.getMessage());
+
+        // 🔴 Usar BAD_REQUEST (400) para evitar que Spring Security desloguee
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(new MensajeDto<>(true, ex.getMessage()));
+    }
+
+    @ExceptionHandler(org.springframework.security.access.AccessDeniedException.class)
+    public ResponseEntity<MensajeDto<?>> handleSpringAccessDeniedException(
+            org.springframework.security.access.AccessDeniedException ex) {
+
+        String username = "usuario desconocido";
+        try {
+            org.springframework.security.core.Authentication auth =
+                    org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication();
+            if (auth != null && auth.isAuthenticated()) {
+                username = auth.getName();
+            }
+        } catch (Exception e) {
+            // Ignorar si no se puede obtener
+        }
+
+        String mensaje;
+        if ("adminprueba".equals(username)) {
+            mensaje = "El administrador de prueba 'adminprueba' no tiene permisos para esta acción. " +
+                    "Esta cuenta es solo para consultas y operaciones básicas.";
+        } else {
+            mensaje = "Acceso denegado. No tiene permisos para realizar esta operación.";
+        }
+
+        log.warn("Acceso denegado para usuario '{}': {}", username, ex.getMessage());
+
+        // 🔴 CAMBIADO de FORBIDDEN (403) a BAD_REQUEST (400)
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(new MensajeDto<>(true, mensaje));
+    }
+
+    @ExceptionHandler(org.springframework.security.authorization.AuthorizationDeniedException.class)
+    public ResponseEntity<MensajeDto<?>> handleAuthorizationDeniedException(
+            org.springframework.security.authorization.AuthorizationDeniedException ex) {
+
+        String username = "usuario desconocido";
+        try {
+            org.springframework.security.core.Authentication auth =
+                    org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication();
+            if (auth != null && auth.isAuthenticated()) {
+                username = auth.getName();
+            }
+        } catch (Exception e) {
+            // Ignorar
+        }
+
+        String mensaje;
+        if ("adminprueba".equals(username)) {
+            mensaje = "El administrador de prueba no puede eliminar usuarios. " +
+                    "Use la opción de 'Desactivar usuario' en lugar de 'Eliminar'.";
+        } else {
+            mensaje = "Acceso denegado por falta de permisos.";
+        }
+
+        log.warn("Autorización denegada para usuario '{}': {}", username, ex.getMessage());
+
+        // 🔴 Ya está como BAD_REQUEST (400) - Mantener
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(new MensajeDto<>(true, mensaje));
+    }
+
+    @ExceptionHandler(org.springframework.security.core.AuthenticationException.class)
+    public ResponseEntity<MensajeDto<?>> handleSpringAuthenticationException(
+            org.springframework.security.core.AuthenticationException ex) {
+        log.warn("Error de autenticación Spring Security: {}", ex.getMessage());
+        // ✅ AuthenticationException debe mantener UNAUTHORIZED (401)
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                .body(new MensajeDto<>(true, "Error de autenticación: " + ex.getMessage()));
     }
 
     @ExceptionHandler(Exception.class)
