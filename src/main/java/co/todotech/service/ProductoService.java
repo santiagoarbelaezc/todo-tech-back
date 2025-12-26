@@ -2,6 +2,7 @@ package co.todotech.service;
 
 import co.todotech.model.dto.producto.ProductoDto;
 import co.todotech.model.enums.EstadoProducto;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 
@@ -33,4 +34,10 @@ public interface ProductoService {
     void decrementarStock(Long id, Integer cantidad);
     void establecerStock(Long id, Integer nuevoStock);
     Integer consultarStock(Long id);
+
+    @Transactional(readOnly = true)
+    List<String> obtenerTodasLasMarcas();
+
+    @Transactional(readOnly = true)
+    List<String> obtenerMarcasDeProductosActivos();
 }

@@ -403,4 +403,34 @@ public class ProductoServiceImpl implements ProductoService {
                 ? EstadoProducto.INACTIVO
                 : EstadoProducto.ACTIVO;
     }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<String> obtenerTodasLasMarcas() {
+        log.debug("Obteniendo todas las marcas únicas de productos");
+
+        try {
+            List<String> marcas = productoRepository.findAllMarcasDistinct();
+            log.debug("Se encontraron {} marcas distintas", marcas.size());
+            return marcas;
+        } catch (Exception e) {
+            log.error("Error al obtener las marcas: {}", e.getMessage());
+            throw new ProductoBusinessException("Error al obtener la lista de marcas: " + e.getMessage());
+        }
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<String> obtenerMarcasDeProductosActivos() {
+        log.debug("Obteniendo marcas únicas de productos activos");
+
+        try {
+            List<String> marcas = productoRepository.findMarcasDistinctByEstadoActivo();
+            log.debug("Se encontraron {} marcas de productos activos", marcas.size());
+            return marcas;
+        } catch (Exception e) {
+            log.error("Error al obtener las marcas de productos activos: {}", e.getMessage());
+            throw new ProductoBusinessException("Error al obtener la lista de marcas activas: " + e.getMessage());
+        }
+    }
 }

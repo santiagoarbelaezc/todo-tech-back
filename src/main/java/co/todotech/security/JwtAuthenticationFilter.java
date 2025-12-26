@@ -85,15 +85,29 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         filterChain.doFilter(request, response);
     }
 
-    // ✅ NUEVO MÉTODO: VERIFICAR SI ES URL PÚBLICA
+    // ✅ MÉTODO ACTUALIZADO: VERIFICAR SI ES URL PÚBLICA
     private boolean isPublicUrl(String requestURI) {
+        // Verificar coincidencias exactas o con prefijo
         return requestURI.equals("/usuarios/login") ||
                 requestURI.equals("/usuarios/recordar-contrasena") ||
-                requestURI.startsWith("/productos/publicos/"); // ✅ AGREGAR ENDPOINTS PÚBLICOS DE PRODUCTOS
+
+                // ✅ CATEGORÍAS PÚBLICAS
+                requestURI.startsWith("/categorias/publicos") ||
+
+                // ✅ PRODUCTOS PÚBLICOS
+                requestURI.startsWith("/productos/publicos/") ||
+
+                // ✅ PAGOS
+                requestURI.startsWith("/stripe/") ||
+                requestURI.startsWith("/paypal/") ||
+
+                // ✅ HEALTH & MONITORING
+                requestURI.equals("/health") ||
+                requestURI.equals("/") ||
+                requestURI.startsWith("/api/monitoring/");
     }
 
-    // ✅ ACTUALIZAR MÉTODO EXISTENTE
     private boolean requiresAuthentication(String requestURI) {
-        return !isPublicUrl(requestURI); // ✅ AHORA USA EL MISMO MÉTODO
+        return !isPublicUrl(requestURI);
     }
 }

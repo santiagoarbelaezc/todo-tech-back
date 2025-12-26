@@ -45,6 +45,7 @@ public class SecurityConfig {
                                 "/usuarios/login",
                                 "/usuarios/recordar-contrasena",
                                 "/productos/publicos/**",
+                                "/categorias/publicos/**",
                                 "/stripe/**",
                                 "/paypal/**",
                                 "/health",

@@ -201,4 +201,31 @@ public class ProductoController {
         ProductoDto dto = productoService.obtenerProductoPorId(id);
         return ResponseEntity.ok(new MensajeDto<>(false, "Producto encontrado", dto));
     }
+
+
+    @GetMapping("/publicos/marcas")
+    public ResponseEntity<MensajeDto<List<String>>> obtenerTodasLasMarcasPublico() {
+        List<String> marcas = productoService.obtenerTodasLasMarcas();
+        return ResponseEntity.ok(new MensajeDto<>(false, "Marcas obtenidas exitosamente", marcas));
+    }
+
+    @GetMapping("/publicos/marcas/activas")
+    public ResponseEntity<MensajeDto<List<String>>> obtenerMarcasDeProductosActivosPublico() {
+        List<String> marcas = productoService.obtenerMarcasDeProductosActivos();
+        return ResponseEntity.ok(new MensajeDto<>(false, "Marcas de productos activos obtenidas", marcas));
+    }
+
+    @GetMapping("/marcas")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<MensajeDto<List<String>>> obtenerTodasLasMarcas() {
+        List<String> marcas = productoService.obtenerTodasLasMarcas();
+        return ResponseEntity.ok(new MensajeDto<>(false, "Marcas obtenidas exitosamente", marcas));
+    }
+
+    @GetMapping("/marcas/activas")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<MensajeDto<List<String>>> obtenerMarcasDeProductosActivos() {
+        List<String> marcas = productoService.obtenerMarcasDeProductosActivos();
+        return ResponseEntity.ok(new MensajeDto<>(false, "Marcas de productos activos obtenidas", marcas));
+    }
 }

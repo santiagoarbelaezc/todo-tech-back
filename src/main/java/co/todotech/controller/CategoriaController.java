@@ -95,4 +95,14 @@ public class CategoriaController {
             return ResponseEntity.badRequest().body(new MensajeDto<>(true, e.getMessage(), null));
         }
     }
+
+    @GetMapping("/publicos")
+    public ResponseEntity<MensajeDto<List<CategoriaDto>>> obtenerTodasLasCategoriasPublico() {
+        try {
+            List<CategoriaDto> categorias = categoriaService.obtenerTodasLasCategorias();
+            return ResponseEntity.ok(new MensajeDto<>(false, "Categorías obtenidas exitosamente", categorias));
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(new MensajeDto<>(true, e.getMessage(), null));
+        }
+    }
 }

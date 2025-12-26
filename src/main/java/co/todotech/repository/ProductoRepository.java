@@ -38,4 +38,10 @@ public interface ProductoRepository extends JpaRepository<Producto, Long> {
             @Param("stockCritico") int stockCritico,
             @Param("estado") EstadoProducto estado);
 
+    @Query("SELECT DISTINCT p.marca FROM Producto p WHERE p.marca IS NOT NULL AND p.marca <> '' ORDER BY p.marca")
+    List<String> findAllMarcasDistinct();
+
+    @Query("SELECT DISTINCT p.marca FROM Producto p WHERE p.estado = 'ACTIVO' AND p.marca IS NOT NULL AND p.marca <> '' ORDER BY p.marca")
+    List<String> findMarcasDistinctByEstadoActivo();
+
 }
