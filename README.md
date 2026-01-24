@@ -21,24 +21,6 @@
 
 ## 🏗️ **Arquitectura por Capas**
 
-### **Estructura del Proyecto**
-src/main/java/co/todotech/
-├── 📁 configuration/ # Configuraciones de la aplicación
-├── 📁 controller/ # Controladores REST (Capa de Presentación)
-├── 📁 service/ # Interfaces de servicio (Capa de Lógica)
-│ └── 📁 impl/ # Implementaciones de servicios
-├── 📁 repository/ # Repositorios JPA (Capa de Persistencia)
-├── 📁 model/ # Modelos de datos
-│ ├── 📁 entities/ # Entidades JPA
-│ ├── 📁 dto/ # Objetos de Transferencia de Datos
-│ └── 📁 enums/ # Enumeraciones
-├── 📁 mapper/ # Mappers (DTO ↔ Entity)
-├── 📁 security/ # Configuración de seguridad JWT
-├── 📁 exception/ # Manejo personalizado de excepciones
-├── 📁 handler/ # Handlers globales
-└── 📁 utils/ # Utilidades comunes
-
-
 ---
 
 ## 🧩 **Entidades Principales**
@@ -130,18 +112,7 @@ src/main/java/co/todotech/
 - Maven 3.6+
 - PostgreSQL 14+
 
-🔐 Características de Seguridad
-Autenticación JWT con tokens de acceso y refresh
 
-Spring Security con configuración personalizada
-
-CORS configurado para frontend específico
-
-Validación de datos en todas las entradas
-
-Encriptación de contraseñas con BCrypt
-
-Roles de usuario (USER, ADMIN)
 
 👨‍💻 Autor
 <div align="center">
